@@ -15,11 +15,12 @@ import CategoryManager from './components/categories/CategoryManager';
 import CategoryStats from './components/dashboard/CategoryStats';
 import ProgressCard from './components/dashboard/ProgressCard';
 import MonthlyChart from './components/dashboard/MonthlyChart';
+import DeletedTasksView from './components/tasks/DeletedTasksView';
 import SafeIcon from './common/SafeIcon';
+
 import { motion } from 'framer-motion';
 import * as FiIcons from 'react-icons/fi';
-
-const { FiPlus, FiRefreshCw, FiSettings } = FiIcons;
+const { FiPlus, FiRefreshCw, FiSettings, FiTrash2 } = FiIcons;
 
 import './App.css';
 
@@ -43,30 +44,31 @@ const AppContent = () => {
 
   const [showTaskForm, setShowTaskForm] = useState(false);
   const [showCategoryManager, setShowCategoryManager] = useState(false);
+  const [showDeletedTasks, setShowDeletedTasks] = useState(false);
   const [editingTask, setEditingTask] = useState(undefined);
 
-  // Calculate task counts for filters
+  // Calculate task counts for filters - FIXED: properly exclude completed tasks
   const taskCounts = {
-    all: allTasks.length,
+    all: allTasks.filter(t => !t.completed).length, // Only incomplete tasks for "All"
     today: allTasks.filter(t => {
       const today = new Date();
       const taskDate = new Date(t.dueDate);
-      return taskDate.toDateString() === today.toDateString();
+      return taskDate.toDateString() === today.toDateString() && !t.completed; // Only incomplete today tasks
     }).length,
     tomorrow: allTasks.filter(t => {
       const tomorrow = new Date();
       tomorrow.setDate(tomorrow.getDate() + 1);
       const taskDate = new Date(t.dueDate);
-      return taskDate.toDateString() === tomorrow.toDateString();
+      return taskDate.toDateString() === tomorrow.toDateString() && !t.completed; // Only incomplete tomorrow tasks
     }).length,
     upcoming: allTasks.filter(t => {
       const taskDate = new Date(t.dueDate);
       const tomorrow = new Date();
       tomorrow.setDate(tomorrow.getDate() + 1);
-      return taskDate > tomorrow;
+      return taskDate > tomorrow && !t.completed; // Only incomplete upcoming tasks
     }).length,
-    completed: allTasks.filter(t => t.completed).length,
-    incomplete: allTasks.filter(t => !t.completed).length,
+    completed: allTasks.filter(t => t.completed).length, // All completed tasks
+    incomplete: allTasks.filter(t => !t.completed).length, // All incomplete tasks
   };
 
   const handleTaskSubmit = async (taskData) => {
@@ -90,6 +92,7 @@ const AppContent = () => {
 
   // Handle task completion toggle
   const handleTaskToggle = async (taskId, completed) => {
+    console.log('Toggling task:', taskId, 'to completed:', completed); // Debug log
     await updateTask(taskId, { completed });
   };
 
@@ -120,10 +123,17 @@ const AppContent = () => {
     return <AuthForm />;
   }
 
+  // Debug logs to check filtering
+  console.log('Current filter:', filter);
+  console.log('All tasks count:', allTasks.length);
+  console.log('Filtered tasks count:', tasks.length);
+  console.log('Completed tasks in allTasks:', allTasks.filter(t => t.completed).length);
+  console.log('Task counts:', taskCounts);
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-dark-950 via-dark-900 to-dark-800">
       <Navbar />
-      
+
       <main className="w-full px-[100px] py-8">
         {/* Progress Cards */}
         <ProgressCard stats={stats} />
@@ -147,11 +157,9 @@ const AppContent = () => {
                     className="flex items-center space-x-2 mt-2"
                   >
                     <span className="text-sm text-primary-400">
-                      Filtered by: {
-                        categoryFilter === 'uncategorized' 
-                          ? 'Uncategorized' 
-                          : categories.find(c => c.id === categoryFilter)?.name
-                      }
+                      Filtered by: {categoryFilter === 'uncategorized' 
+                        ? 'Uncategorized' 
+                        : categories.find(c => c.id === categoryFilter)?.name}
                     </span>
                     <button
                       onClick={handleClearCategoryFilter}
@@ -161,8 +169,51 @@ const AppContent = () => {
                     </button>
                   </motion.div>
                 )}
+                {/* Filter Status Indicator */}
+                {filter !== 'all' && (
+                  <motion.div
+                    initial={{ opacity: 0, y: -10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="flex items-center space-x-2 mt-1"
+                  >
+                    <span className="text-sm text-blue-400">
+                      Showing: {filter === 'completed' ? 'Completed tasks' : 
+                               filter === 'incomplete' ? 'Incomplete tasks' :
+                               filter === 'today' ? 'Today\'s incomplete tasks' :
+                               filter === 'tomorrow' ? 'Tomorrow\'s incomplete tasks' :
+                               filter === 'upcoming' ? 'Upcoming incomplete tasks' : 
+                               filter.charAt(0).toUpperCase() + filter.slice(1)}
+                    </span>
+                    {(filter === 'all' || filter === 'today' || filter === 'tomorrow' || filter === 'upcoming') && (
+                      <span className="text-xs text-dark-500">(completed tasks hidden)</span>
+                    )}
+                  </motion.div>
+                )}
+                {/* Show current filter for "All Tasks" */}
+                {filter === 'all' && (
+                  <motion.div
+                    initial={{ opacity: 0, y: -10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="flex items-center space-x-2 mt-1"
+                  >
+                    <span className="text-sm text-green-400">
+                      Showing: All incomplete tasks
+                    </span>
+                    <span className="text-xs text-dark-500">(completed tasks hidden)</span>
+                  </motion.div>
+                )}
               </div>
+
               <div className="flex items-center space-x-3">
+                <motion.button
+                  whileHover={{ scale: 1.05 }}
+                  whileTap={{ scale: 0.95 }}
+                  onClick={() => setShowDeletedTasks(true)}
+                  className="p-3 bg-dark-700 hover:bg-dark-600 text-dark-300 hover:text-white rounded-xl transition-all duration-200"
+                  title="View Deleted Tasks"
+                >
+                  <SafeIcon icon={FiTrash2} className="w-5 h-5" />
+                </motion.button>
                 <motion.button
                   whileHover={{ scale: 1.05 }}
                   whileTap={{ scale: 0.95 }}
@@ -225,8 +276,8 @@ const AppContent = () => {
             </div>
 
             {/* Category Statistics - Now Clickable */}
-            <CategoryStats 
-              categories={categories} 
+            <CategoryStats
+              categories={categories}
               tasks={allTasks}
               onCategoryClick={handleCategoryClick}
             />
@@ -245,6 +296,11 @@ const AppContent = () => {
       <CategoryManager
         isOpen={showCategoryManager}
         onClose={() => setShowCategoryManager(false)}
+      />
+
+      <DeletedTasksView
+        isOpen={showDeletedTasks}
+        onClose={() => setShowDeletedTasks(false)}
       />
     </div>
   );

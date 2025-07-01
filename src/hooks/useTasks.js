@@ -37,9 +37,11 @@ export const useTasks = () => {
 
   const fetchTasks = async () => {
     try {
+      // Only fetch non-deleted tasks
       const { data, error } = await supabase
         .from('tasks_dt2024')
         .select('*')
+        .is('deleted_at', null)
         .order('due_date', { ascending: true });
 
       if (error) throw error;
@@ -106,8 +108,8 @@ export const useTasks = () => {
           // By weekday occurrence (e.g., 2nd Monday)
           const targetWeekday = config.monthlyWeekday || 1;
           const occurrence = config.monthlyWeekdayOccurrence || 1;
-          
           nextDate = addMonths(nextDate, config.monthlyInterval || 1);
+          
           const monthStart = startOfMonth(nextDate);
           const monthEnd = endOfMonth(nextDate);
           
@@ -155,12 +157,13 @@ export const useTasks = () => {
       const now = new Date();
       const today = format(now, 'yyyy-MM-dd');
 
-      // Get all repeating tasks that might need new instances
+      // Get all repeating tasks that might need new instances (non-deleted)
       const { data: repeatingTasks, error } = await supabase
         .from('tasks_dt2024')
         .select('*')
         .neq('repeat_type', 'none')
         .eq('completed', true)
+        .is('deleted_at', null)
         .lt('due_date', today);
 
       if (error) throw error;
@@ -197,6 +200,7 @@ export const useTasks = () => {
           .eq('due_date', nextDateStr)
           .eq('due_time', nextTimeStr)
           .eq('repeat_type', task.repeatType)
+          .is('deleted_at', null)
           .single();
 
         if (!existingTask) {
@@ -282,9 +286,11 @@ export const useTasks = () => {
 
   const updateTask = async (id, updates) => {
     try {
+      const task = tasks.find(t => t.id === id);
+      if (!task) throw new Error('Task not found');
+
       // Prepare update data with proper null handling and column mapping
       const updateData = {};
-      
       if (updates.title !== undefined) updateData.title = updates.title;
       if (updates.description !== undefined) updateData.description = updates.description;
       if (updates.categoryId !== undefined) updateData.category_id = updates.categoryId;
@@ -292,21 +298,84 @@ export const useTasks = () => {
       if (updates.repeatConfig !== undefined) updateData.repeat_config = updates.repeatConfig;
       if (updates.dueDate !== undefined) updateData.due_date = updates.dueDate;
       if (updates.dueTime !== undefined) updateData.due_time = updates.dueTime;
-      
+
+      // Handle completion with auto-rescheduling for repeating tasks
       if (updates.completed !== undefined) {
-        updateData.completed = updates.completed;
-        
-        // Handle streak logic for repeating tasks
-        if (updates.completed && tasks.find(t => t.id === id)?.repeatType !== 'none') {
-          const task = tasks.find(t => t.id === id);
-          const today = format(new Date(), 'yyyy-MM-dd');
-          
-          if (task && task.dueDate === today) {
-            const yesterday = format(addDays(new Date(), -1), 'yyyy-MM-dd');
-            const wasCompletedYesterday = task.lastCompletedDate === yesterday;
+        const isRepeatingTask = task.repeatType && task.repeatType !== 'none';
+        const isCompletingTask = updates.completed && !task.completed;
+
+        if (isRepeatingTask && isCompletingTask) {
+          // Calculate next occurrence
+          const nextOccurrence = getNextOccurrence(task);
+          if (nextOccurrence) {
+            const nextDateStr = format(nextOccurrence, 'yyyy-MM-dd');
+
+            // Check if next instance already exists
+            const { data: existingNextTask } = await supabase
+              .from('tasks_dt2024')
+              .select('id')
+              .eq('title', task.title)
+              .eq('due_date', nextDateStr)
+              .eq('due_time', task.dueTime)
+              .eq('repeat_type', task.repeatType)
+              .is('deleted_at', null)
+              .single();
+
+            // Update current task's due date to next occurrence if no future instance exists
+            if (!existingNextTask) {
+              updateData.due_date = nextDateStr;
+              updateData.completed = false; // Reset completion for next occurrence
+
+              // Handle streak logic and completion tracking
+              const today = format(new Date(), 'yyyy-MM-dd');
+              if (isToday(new Date(task.dueDate))) {
+                const yesterday = format(addDays(new Date(), -1), 'yyyy-MM-dd');
+                const wasCompletedYesterday = task.lastCompletedDate === yesterday;
+                updateData.streak_count = wasCompletedYesterday 
+                  ? (task.streakCount || 0) + 1 
+                  : 1;
+                updateData.last_completed_date = today;
+              }
+              toast.success('Task completed! 🎉 Scheduled for next occurrence.');
+            } else {
+              // If next instance exists, just mark current as completed
+              updateData.completed = updates.completed;
+              
+              // Handle streak logic and completion tracking
+              const today = format(new Date(), 'yyyy-MM-dd');
+              if (isToday(new Date(task.dueDate))) {
+                const yesterday = format(addDays(new Date(), -1), 'yyyy-MM-dd');
+                const wasCompletedYesterday = task.lastCompletedDate === yesterday;
+                updateData.streak_count = wasCompletedYesterday 
+                  ? (task.streakCount || 0) + 1 
+                  : 1;
+                updateData.last_completed_date = today;
+              }
+              toast.success('Task completed! 🎉');
+            }
+          } else {
+            // No next occurrence (reached end date), just mark as completed
+            updateData.completed = updates.completed;
             
-            updateData.streak_count = wasCompletedYesterday ? (task.streakCount || 0) + 1 : 1;
+            // Still track completion date for charts
+            if (updates.completed) {
+              const today = format(new Date(), 'yyyy-MM-dd');
+              updateData.last_completed_date = today;
+            }
+            toast.success('Task completed! 🎉');
+          }
+        } else {
+          // Non-repeating task or uncompleting a task
+          updateData.completed = updates.completed;
+          if (updates.completed) {
+            // Track completion date for non-repeating tasks too
+            const today = format(new Date(), 'yyyy-MM-dd');
             updateData.last_completed_date = today;
+            toast.success('Task completed! 🎉');
+          } else {
+            // If uncompleting, clear the completion date
+            updateData.last_completed_date = null;
+            toast.success('Task marked incomplete');
           }
         }
       }
@@ -323,24 +392,24 @@ export const useTasks = () => {
         throw error;
       }
 
+      // Update local state
       setTasks(prev =>
         prev.map(task =>
           task.id === id
             ? {
                 ...task,
                 ...updates,
+                dueDate: updateData.due_date || task.dueDate,
+                completed: updateData.completed !== undefined ? updateData.completed : task.completed,
                 streakCount: updateData.streak_count || task.streakCount,
-                lastCompletedDate: updateData.last_completed_date || task.lastCompletedDate,
+                lastCompletedDate: updateData.last_completed_date !== undefined 
+                  ? updateData.last_completed_date 
+                  : task.lastCompletedDate,
               }
             : task
         )
       );
 
-      if (updates.completed !== undefined) {
-        toast.success(updates.completed ? 'Task completed! 🎉' : 'Task marked incomplete');
-      } else {
-        toast.success('Task updated successfully!');
-      }
     } catch (error) {
       console.error('Error updating task:', error);
       toast.error('Failed to update task: ' + error.message);
@@ -348,17 +417,19 @@ export const useTasks = () => {
     }
   };
 
+  // Soft delete task (move to trash)
   const deleteTask = async (id) => {
     try {
       const { error } = await supabase
         .from('tasks_dt2024')
-        .delete()
+        .update({ deleted_at: new Date().toISOString() })
         .eq('id', id);
 
       if (error) throw error;
 
+      // Remove from current tasks list
       setTasks(prev => prev.filter(task => task.id !== id));
-      toast.success('Task deleted successfully');
+      toast.success('Task moved to trash');
     } catch (error) {
       console.error('Error deleting task:', error);
       toast.error('Failed to delete task');
@@ -373,14 +444,18 @@ export const useTasks = () => {
     // Filter by time/status
     let timeMatch = true;
     switch (filter) {
+      case 'all':
+        // IMPORTANT: Hide completed tasks from "All Tasks" view
+        timeMatch = !task.completed;
+        break;
       case 'today':
-        timeMatch = isToday(taskDate);
+        timeMatch = isToday(taskDate) && !task.completed;
         break;
       case 'tomorrow':
-        timeMatch = isTomorrow(taskDate);
+        timeMatch = isTomorrow(taskDate) && !task.completed;
         break;
       case 'upcoming':
-        timeMatch = isAfter(taskDate, today) && !isToday(taskDate) && !isTomorrow(taskDate);
+        timeMatch = isAfter(taskDate, today) && !isToday(taskDate) && !isTomorrow(taskDate) && !task.completed;
         break;
       case 'completed':
         timeMatch = task.completed;

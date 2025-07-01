@@ -7,8 +7,9 @@
     "dev": "vite",
     "build": "npm run lint && vite build",
     "lint": "eslint .",
-    "lint:error": "eslint . --quiet", 
-    "preview": "vite preview"
+    "lint:error": "eslint . --quiet",
+    "preview": "vite preview",
+    "setup-functions": "supabase functions new send-email && supabase functions new process-email-notifications"
   },
   "dependencies": {
     "@questlabs/react-sdk": "^2.1.9",

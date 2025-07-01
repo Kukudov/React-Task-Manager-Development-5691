@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Test Edge Function</title>
+</head>
+<body>
+    <h1>Edge Function Test</h1>
+    <button onclick="testFunction()">Test Send Email</button>
+    <div id="result"></div>
+
+    <script>
+        async function testFunction() {
+            const resultDiv = document.getElementById('result');
+            resultDiv.innerHTML = 'Testing...';
+            
+            try {
+                console.log('Testing Edge Function...');
+                
+                const response = await fetch('https://hhfenfbfallnzeeksnir.supabase.co/functions/v1/send-email', {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhoZmVuZmJmYWxsbnplZWtzbmlyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTEyMTAzMDksImV4cCI6MjA2Njc4NjMwOX0.IeR-F2SyyvLB_PVdvaA3iPynnwiFIMf288_KFadWl2U',
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        type: 'test',
+                        to: 'test@example.com',
+                        subject: 'Test Email',
+                        html: '<h1>Test from HTML page</h1>'
+                    }),
+                });
+                
+                const result = await response.json();
+                resultDiv.innerHTML = `
+                    <h3>Result:</h3>
+                    <p>Status: ${response.status}</p>
+                    <pre>${JSON.stringify(result, null, 2)}</pre>
+                `;
+                
+                console.log('Success:', result);
+                
+            } catch (error) {
+                resultDiv.innerHTML = `
+                    <h3>Error:</h3>
+                    <p style="color: red;">${error.message}</p>
+                `;
+                console.error('Error:', error);
+            }
+        }
+    </script>
+</body>
+</html>

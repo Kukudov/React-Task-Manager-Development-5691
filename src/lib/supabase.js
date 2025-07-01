@@ -16,9 +16,9 @@ export default supabase
 
 console.log('✅ Supabase connected successfully!')
 
-// Complete database schema - now fully synchronized
+// Complete database schema - now fully synchronized with deleted_at column
 export const DATABASE_SCHEMA = `
--- Complete tasks table with all required columns
+-- Complete tasks table with all required columns including soft delete
 CREATE TABLE IF NOT EXISTS tasks_dt2024 (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
   title TEXT NOT NULL,
@@ -33,7 +33,8 @@ CREATE TABLE IF NOT EXISTS tasks_dt2024 (
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
   user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE NOT NULL,
   streak_count INTEGER DEFAULT 0,
-  last_completed_date DATE
+  last_completed_date DATE,
+  deleted_at TIMESTAMP WITH TIME ZONE
 );
 
 -- Categories table
@@ -52,25 +53,40 @@ ALTER TABLE tasks_dt2024 ENABLE ROW LEVEL SECURITY;
 ALTER TABLE categories_dt2024 ENABLE ROW LEVEL SECURITY;
 
 -- RLS Policies for tasks
-CREATE POLICY "Users can view own tasks" ON tasks_dt2024 FOR SELECT USING (auth.uid() = user_id);
-CREATE POLICY "Users can insert own tasks" ON tasks_dt2024 FOR INSERT WITH CHECK (auth.uid() = user_id);
-CREATE POLICY "Users can update own tasks" ON tasks_dt2024 FOR UPDATE USING (auth.uid() = user_id);
-CREATE POLICY "Users can delete own tasks" ON tasks_dt2024 FOR DELETE USING (auth.uid() = user_id);
+CREATE POLICY "Users can view own tasks" ON tasks_dt2024 
+FOR SELECT USING (auth.uid() = user_id);
+
+CREATE POLICY "Users can insert own tasks" ON tasks_dt2024 
+FOR INSERT WITH CHECK (auth.uid() = user_id);
+
+CREATE POLICY "Users can update own tasks" ON tasks_dt2024 
+FOR UPDATE USING (auth.uid() = user_id);
+
+CREATE POLICY "Users can delete own tasks" ON tasks_dt2024 
+FOR DELETE USING (auth.uid() = user_id);
 
 -- RLS Policies for categories
-CREATE POLICY "Users can view own categories" ON categories_dt2024 FOR SELECT USING (auth.uid() = user_id);
-CREATE POLICY "Users can insert own categories" ON categories_dt2024 FOR INSERT WITH CHECK (auth.uid() = user_id);
-CREATE POLICY "Users can update own categories" ON categories_dt2024 FOR UPDATE USING (auth.uid() = user_id);
-CREATE POLICY "Users can delete own categories" ON categories_dt2024 FOR DELETE USING (auth.uid() = user_id);
+CREATE POLICY "Users can view own categories" ON categories_dt2024 
+FOR SELECT USING (auth.uid() = user_id);
+
+CREATE POLICY "Users can insert own categories" ON categories_dt2024 
+FOR INSERT WITH CHECK (auth.uid() = user_id);
+
+CREATE POLICY "Users can update own categories" ON categories_dt2024 
+FOR UPDATE USING (auth.uid() = user_id);
+
+CREATE POLICY "Users can delete own categories" ON categories_dt2024 
+FOR DELETE USING (auth.uid() = user_id);
 
 -- Indexes for performance
 CREATE INDEX IF NOT EXISTS tasks_user_id_idx ON tasks_dt2024(user_id);
 CREATE INDEX IF NOT EXISTS tasks_due_date_idx ON tasks_dt2024(due_date);
 CREATE INDEX IF NOT EXISTS tasks_category_id_idx ON tasks_dt2024(category_id);
+CREATE INDEX IF NOT EXISTS tasks_deleted_at_idx ON tasks_dt2024(deleted_at);
 CREATE INDEX IF NOT EXISTS categories_user_id_idx ON categories_dt2024(user_id);
 
 -- Updated_at triggers
-CREATE OR REPLACE FUNCTION handle_updated_at()
+CREATE OR REPLACE FUNCTION handle_updated_at() 
 RETURNS TRIGGER AS $$
 BEGIN
   NEW.updated_at = timezone('utc'::text, now());
@@ -78,11 +94,11 @@ BEGIN
 END;
 $$ language 'plpgsql';
 
-CREATE TRIGGER handle_tasks_updated_at
-  BEFORE UPDATE ON tasks_dt2024
+CREATE TRIGGER handle_tasks_updated_at 
+  BEFORE UPDATE ON tasks_dt2024 
   FOR EACH ROW EXECUTE PROCEDURE handle_updated_at();
 
-CREATE TRIGGER handle_categories_updated_at
-  BEFORE UPDATE ON categories_dt2024
+CREATE TRIGGER handle_categories_updated_at 
+  BEFORE UPDATE ON categories_dt2024 
   FOR EACH ROW EXECUTE PROCEDURE handle_updated_at();
 `;
